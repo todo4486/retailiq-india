@@ -1,0 +1,13 @@
+flask>=3,<4
+pandas>=2.2,<3
+numpy>=1.26,<3
+scikit-learn>=1.5,<1.7
+mlxtend>=0.23,<0.24
+pymysql
+cryptography
+sqlalchemy>=2,<3
+openpyxl
+reportlab>=4.2,<4.3
+matplotlib
+pyparsing<3.2
+python-dotenv

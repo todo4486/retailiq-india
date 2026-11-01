@@ -1,0 +1,21 @@
+.mysql/
+backend/.venv/
+backend/.env
+backend/storage/
+frontend/node_modules/
+frontend/dist/
+data/raw/
+__pycache__/
+.DS_Store
+
+.secret_key
+backend/.secret_key
+
+# Recreated by scripts/setup.sh
+data/*.csv
+
+# Local editor and preview settings
+.claude/
+
+frontend/*.tsbuildinfo
+*.log

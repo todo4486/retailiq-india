@@ -1,0 +1,262 @@
+@import "tailwindcss";
+@import "@fontsource-variable/manrope/index.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+
+@theme {
+  --color-paper: #f5f4ef;
+  --color-ink: #191919;
+  --color-muted: #85847f;
+  --color-accent: #315c46;
+  --color-accent2: #d58a52;
+  --color-rule: #ddddd5;
+  --color-card: #ffffff;
+  --color-danger: #a83a3a;
+  --font-sans: "Manrope Variable", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --breakpoint-nav: 78rem;
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-paper);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+button,
+select,
+a,
+input[type="range"],
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Repeated type styles. Everything else stays in utility classes. */
+@layer components {
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 16px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .display {
+    font-weight: 500;
+    letter-spacing: -0.045em;
+    line-height: 0.98;
+    font-size: clamp(2.75rem, 8.2vw, 7.5rem);
+  }
+  .section-title {
+    font-weight: 500;
+    letter-spacing: -0.025em;
+    line-height: 1.1;
+    font-size: clamp(1.5rem, 2.8vw, 2.5rem);
+  }
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .field {
+    height: 34px;
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--color-rule);
+    background: var(--color-card);
+    padding: 0 10px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--color-ink);
+    transition: border-color 120ms;
+  }
+  .field:hover {
+    border-color: var(--color-muted);
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .data-table th {
+    position: sticky;
+    top: 0;
+    background: var(--color-paper);
+    z-index: 1;
+    border-bottom: 1px solid var(--color-ink);
+    padding: 8px 12px 8px 0;
+    text-align: left;
+    font-weight: 400;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .data-table td {
+    border-bottom: 1px solid var(--color-rule);
+    padding: 7px 12px 7px 0;
+    vertical-align: baseline;
+  }
+  .data-table .right {
+    text-align: right;
+  }
+  .data-table tbody tr {
+    transition: background-color 100ms;
+  }
+  .data-table tbody tr:hover {
+    background: rgba(49, 92, 70, 0.05);
+  }
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.page-enter {
+  animation: page-in 260ms ease-out both;
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+.loading-bar {
+  animation: indeterminate 1.3s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The drafting grid behind the loader and hero. Its drift is transform-only. */
+.grid-lines {
+  background-image: linear-gradient(to right, rgba(25, 25, 25, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(25, 25, 25, 0.055) 1px, transparent 1px);
+  background-size: 72px 72px;
+}
+@keyframes grid-drift {
+  to {
+    transform: translate3d(-72px, -72px, 0);
+  }
+}
+.grid-drift {
+  inset: -72px;
+  position: absolute;
+  animation: grid-drift 26s linear infinite;
+  will-change: transform;
+}
+
+/* New table rows slide in. Rows that stay on screen keep their keys, so they do not repeat this. */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.data-table tbody tr {
+  animation: row-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.data-table tbody tr:nth-child(2) { animation-delay: 25ms; }
+.data-table tbody tr:nth-child(3) { animation-delay: 50ms; }
+.data-table tbody tr:nth-child(4) { animation-delay: 75ms; }
+.data-table tbody tr:nth-child(5) { animation-delay: 100ms; }
+.data-table tbody tr:nth-child(6) { animation-delay: 125ms; }
+.data-table tbody tr:nth-child(7) { animation-delay: 150ms; }
+.data-table tbody tr:nth-child(8) { animation-delay: 175ms; }
+.data-table tbody tr:nth-child(n + 9) { animation-delay: 200ms; }
+
+@keyframes tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.tooltip-in {
+  animation: tooltip-in 160ms ease-out;
+}
+
+/* Cards rise slightly, and a line draws along the top edge. */
+.lift {
+  position: relative;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lift::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lift:hover {
+  transform: translateY(-2px);
+}
+.lift:hover::before {
+  transform: scaleX(1);
+}
+
+/* Star-schema relationships carry a moving dash while highlighted. */
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+.dash-flow {
+  stroke-dasharray: 5 4;
+  animation: dash-flow 900ms linear infinite;
+}
