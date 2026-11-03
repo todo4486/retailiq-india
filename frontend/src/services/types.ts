@@ -4,7 +4,8 @@ export interface Status {
   dataset: string | null;
   dataset_id: string | null;
   currency: string;
-  data_kind: "synthetic" | "imported" | null;
+  data_kind: "synthetic" | "imported" | "real" | null;
+  data_notice: { notice: string; source: string | null; credit: string | null } | null;
   fact_rows: number;
   last_sync: string | null;
   etl_running: boolean;
@@ -30,13 +31,14 @@ export interface PublicSummary {
 export interface OverviewData {
   range: { from: string; to: string };
   span: { from: string; to: string; first_date: string; last_date: string };
-  data_kind: "synthetic" | "imported" | null;
+  data_kind: "synthetic" | "imported" | "real" | null;
   cities: CityRow[];
   categories: CategoryRow[];
   growth: { years: string[]; quarters: Record<string, number | string>[] };
   compare: string;
   comparison: { from: string; to: string; months: number; expected_months: number } | null;
   partial_month: { month: string; through_day: number } | null;
+  partial_first_month: { month: string; from_day: number } | null;
   kpis: Kpis;
   previous_kpis: Kpis | null;
   series: SeriesPoint[];
@@ -47,7 +49,7 @@ export interface OverviewData {
 
 export interface Dataset {
   id: string; name: string; filename: string; rows: number; columns: number; size: number; added_at: string;
-  roles: Record<string, string>; builtin: boolean; kind: "synthetic" | "imported"; inr_rate: number; source?: string; note?: string;
+  roles: Record<string, string>; builtin: boolean; kind: "synthetic" | "imported" | "real"; inr_rate: number; source?: string; note?: string; credit?: string;
 }
 export interface ColumnProfile {
   name: string; type: string; missing: number; missing_pct: number; unique: number;
@@ -109,7 +111,7 @@ export interface KMeansMetrics {
   diagnostics: { k: number; inertia: number; silhouette: number }[];
   centroids: Record<string, number[]>;
 }
-export interface CustomerOverview { run: MiningRun<KMeansMetrics, { k: number }> | null; segments: Segment[] }
+export interface CustomerOverview { run: MiningRun<KMeansMetrics, { k: number }> | null; segments: Segment[]; identified_customers: number }
 export interface CustomerPoint { id: number; name: string; r: number; f: number; m: number; segment: string }
 export interface Customer { id: number; code: string; name: string; city: string; recency: number; frequency: number; monetary: number; segment: string }
 export interface Paged { total: number; page: number; page_size: number }
@@ -118,8 +120,8 @@ export interface Rule {
   id: number; antecedent_ids: number[]; consequent_ids: number[]; antecedents: string[]; consequents: string[];
   support: number; confidence: number; lift: number; leverage: number;
 }
-export interface AprioriParams { min_support: number; min_confidence: number; min_lift: number; max_len: number; city: string | null }
-export interface AprioriMetrics { baskets: number; products: number; frequent_itemsets: number; rules: number }
+export interface AprioriParams { min_support: number; min_confidence: number; min_lift: number; max_len: number; city: string | null; level?: "product" | "category"; multi_item_only?: boolean }
+export interface AprioriMetrics { baskets: number; products: number; frequent_itemsets: number; rules: number; multi_item_baskets?: number }
 export interface RulesResponse extends Paged { rules: Rule[]; run: MiningRun<AprioriMetrics, AprioriParams> | null }
 export interface RuleProduct { id: number; name: string; rules: number; max_lift: number }
 export interface Association { id: number; name: string; support: number; lift: number; confidence_to: number | null; confidence_from: number | null }
@@ -132,7 +134,7 @@ export interface BasketNetwork {
 
 export type ValueFormat = "money" | "int" | "pct" | "dec1" | "dec2" | "dec3";
 export interface Report {
-  type: string; title: string; currency: string; dataset: string; data_kind: string; data_notice: string; generated_at: string;
+  type: string; title: string; currency: string; dataset: string; data_kind: string; data_notice: string; data_source?: string | null; generated_at: string;
   range: { from: string; to: string };
   summary: { label: string; value: number; format: ValueFormat }[];
   findings: string[];

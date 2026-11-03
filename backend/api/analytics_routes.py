@@ -7,6 +7,7 @@ from etl import pipeline
 from mining import apriori, rfm
 from services import overview as overview_service
 from services import pdf, reports
+from services.datasets import notice_for
 from warehouse import olap
 
 bp = Blueprint("analytics", __name__, url_prefix="/api")
@@ -24,6 +25,7 @@ def status():
         "dataset_id": last["dataset_id"] if last else None,
         "currency": "₹",
         "data_kind": last["kind"] if last else None,
+        **({"data_notice": notice_for(last["dataset_id"], last["kind"])} if last else {"data_notice": None}),
         "fact_rows": fact_rows,
         "last_sync": last["finished_at"] if last else None,
         "etl_running": bool(current and current["status"] == "running"),
@@ -119,7 +121,7 @@ def basket_run():
     try:
         return jsonify(apriori.run_apriori(
             body.get("min_support"), body.get("min_confidence"), body.get("min_lift"),
-            body.get("max_len"), body.get("city"),
+            body.get("max_len"), body.get("city"), body.get("level"),
         ))
     except (TypeError, ValueError) as exc:
         raise ApiError(f"Invalid Apriori parameters: {exc}")

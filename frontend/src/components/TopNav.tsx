@@ -100,7 +100,7 @@ function StatusIndicator() {
     text = "No data loaded";
   } else if (status) {
     color = "bg-accent";
-    text = status.data_kind === "synthetic" ? "Synthetic data" : status.dataset ?? "";
+    text = status.data_kind === "synthetic" ? "Synthetic data" : status.data_kind === "real" ? "Real data" : status.dataset ?? "";
   }
   return (
     <span className="flex min-w-0 items-center gap-1.5" title={status ? `${status.dataset ?? "No dataset"}: ${int(status.fact_rows)} fact rows in MySQL` : undefined}>

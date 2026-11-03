@@ -56,6 +56,11 @@ if [ ! -f "$ROOT/data/online_retail.csv" ]; then
   "$PY" -I "$ROOT/backend/scripts/convert_uci_xlsx.py" "$ROOT/data/raw/Online Retail.xlsx" "$ROOT/data/online_retail.csv"
 fi
 
+echo "== Public datasets (downloaded, not stored in this repository)"
+# Kaggle: Amazon.in seller orders 2022, Indian e-commerce orders 2018-19, India Retail Sales 2023-25.
+# Others: UCI Online Retail II, and 84.51°/Kroger Complete Journey from the completejourney package.
+"$PY" -I "$ROOT/backend/scripts/fetch_datasets.py" "$ROOT"
+
 echo "== Synthetic Indian demo dataset"
 [ -f "$ROOT/data/retailiq_india_synthetic.csv" ] || "$PY" "$ROOT/backend/scripts/generate_india_data.py" "$ROOT/data/retailiq_india_synthetic.csv"
 (cd "$ROOT/backend" && "$PY" scripts/load_demo.py)

@@ -250,13 +250,16 @@ def _signals(current, previous, label_previous, partial, cities, categories, rep
             "headline": f"{top['segment']} are {top['customer_share']:.1%} of customers and {top['revenue_share']:.1%} of revenue.",
             "evidence": f"K-Means on RFM across the full dataset. Average lifetime spend {inr_short(top['avg_monetary'])}.",
         })
-    pairs = get_rules(page_size=200)["rules"]
+    found = get_rules(page_size=200)
+    pairs = found["rules"]
+    multi_only = bool(found["run"] and found["run"]["params"].get("multi_item_only"))
     pair = next((r for r in pairs if len(r["antecedents"]) == 1 and len(r["consequents"]) == 1), None)
     if pair:
         signals.append({
             "topic": "Baskets", "tone": "neutral",
             "headline": f"Customers who buy {pair['antecedents'][0]} often also buy {pair['consequents'][0]}.",
-            "evidence": f"Lift {pair['lift']:.1f}, confidence {pair['confidence']:.0%}, support {pair['support']:.1%} (Apriori, full dataset).",
+            "evidence": f"Lift {pair['lift']:.1f}, confidence {pair['confidence']:.0%}, support {pair['support']:.1%} "
+                        f"(Apriori, {'multi-item baskets only' if multi_only else 'full dataset'}).",
         })
     return signals
 
@@ -336,6 +339,12 @@ def overview(from_month=None, to_month=None, compare="previous"):
     if _month_text(end_index) == last[:7] and last_date.day < calendar.monthrange(last_date.year, last_date.month)[1] - 2:
         partial = {"month": last[:7], "through_day": last_date.day}
 
+    # Likewise, a dataset that starts late in its first month has a partial first month.
+    first_date = dt.date.fromisoformat(first[:10])
+    partial_first = None
+    if _month_text(start_index) == first[:7] and first_date.day > 3:
+        partial_first = {"month": first[:7], "from_day": first_date.day}
+
     label = "the previous period" if compare == "previous" else "the same period a year earlier"
     run = latest_success()
     return {
@@ -345,6 +354,7 @@ def overview(from_month=None, to_month=None, compare="previous"):
         "compare": compare,
         "comparison": comparison,
         "partial_month": partial,
+        "partial_first_month": partial_first,
         "kpis": current,
         "previous_kpis": previous,
         "series": series,

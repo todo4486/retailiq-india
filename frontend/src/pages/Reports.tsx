@@ -65,7 +65,12 @@ function ReportBody({ report }: { report: Report }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <Eyebrow>RetailIQ India / Analytical report</Eyebrow>
-          {report.data_kind === "synthetic" && <div className="num mt-1 text-[11px] text-accent2">Synthetic demonstration data. Not the sales of any real company.</div>}
+          {report.data_notice && (
+            <div className={`num mt-1 max-w-2xl text-[11px] leading-snug ${report.data_kind === "synthetic" ? "text-accent2" : "text-accent"}`}>
+              {report.data_notice}
+              {report.data_source && <> <a className="underline underline-offset-2" href={report.data_source} target="_blank" rel="noreferrer">SOURCE</a></>}
+            </div>
+          )}
           <h2 className="mt-2 text-[clamp(1.75rem,3.6vw,3.25rem)] leading-[1.02] font-medium tracking-[-0.035em]">{report.title}</h2>
         </div>
         <dl className="num text-right text-[11.5px] leading-relaxed text-muted">

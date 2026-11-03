@@ -22,6 +22,14 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 UCI_CSV = PROJECT_DIR / "data" / "online_retail.csv"
 # The synthetic Indian demo data made by scripts/generate_india_data.py; the default dataset.
 INDIA_CSV = PROJECT_DIR / "data" / "retailiq_india_synthetic.csv"
+# Real Amazon.in seller order report from Kaggle, fetched by scripts/setup.sh.
+AMAZON_CSV = PROJECT_DIR / "data" / "amazon_india_sales_2022.csv"
+# Further Kaggle datasets, prepared by scripts/fetch_datasets.py.
+ECOMMERCE_CSV = PROJECT_DIR / "data" / "india_ecommerce_orders_2018.csv"
+RETAIL_SALES_CSV = PROJECT_DIR / "data" / "india_retail_sales_2023_2025.csv"
+# Non-Kaggle real datasets, also prepared by scripts/fetch_datasets.py.
+KROGER_CSV = PROJECT_DIR / "data" / "kroger_complete_journey_2017.csv"
+UCI_II_CSV = PROJECT_DIR / "data" / "uci_online_retail_ii.csv"
 
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 API_PORT = int(os.getenv("RETAILIQ_API_PORT", "5050"))

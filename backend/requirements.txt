@@ -11,3 +11,5 @@ reportlab>=4.2,<4.3
 matplotlib
 pyparsing<3.2
 python-dotenv
+# Reads the R data files of the Complete Journey dataset
+rdata

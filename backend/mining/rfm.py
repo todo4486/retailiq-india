@@ -195,7 +195,8 @@ def segment_summary():
 def get_overview():
     if not one("SELECT 1 AS ok FROM FACT_SALES LIMIT 1"):
         raise WarehouseEmpty()
-    return {"run": run_info("kmeans"), "segments": segment_summary()}
+    identified = one("SELECT COUNT(*) AS n FROM DIM_CUSTOMER WHERE Customer_ID <> 0")["n"]
+    return {"run": run_info("kmeans"), "segments": segment_summary(), "identified_customers": identified}
 
 
 def get_points():

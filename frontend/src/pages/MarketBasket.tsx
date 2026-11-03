@@ -148,7 +148,7 @@ function ProductPicker({ products, value, onSelect }: { products: RuleProduct[];
   }, [products, query]);
   return (
     <div>
-      <Field label={`Find a product (${int(products.length)} in rules)`}>
+      <Field label={`Find an item (${int(products.length)} in rules)`}>
         <input className="field" type="search" placeholder="e.g. atta" value={query} onChange={(e) => setQuery(e.target.value)} />
       </Field>
       <ul className="mt-2 max-h-[440px] overflow-y-auto border-y border-rule" aria-label="Products">
@@ -237,6 +237,8 @@ export default function MarketBasket() {
   const [lift, setLift] = useState("1");
   const [maxLen, setMaxLen] = useState("3");
   const [city, setCity] = useState("");
+  const [level, setLevel] = useState("product");
+  const [multiOnly, setMultiOnly] = useState(false);
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
@@ -250,6 +252,8 @@ export default function MarketBasket() {
       setLift(String(run.params.min_lift));
       setMaxLen(String(run.params.max_len));
       setCity(run.params.city ?? "");
+      setLevel(run.params.level ?? "product");
+      setMultiOnly(Boolean(run.params.multi_item_only));
     }
   }, [run]);
 
@@ -258,7 +262,7 @@ export default function MarketBasket() {
     setMessage(null);
     api.runApriori({
       min_support: Number(support) / 100, min_confidence: Number(confidence) / 100, min_lift: Number(lift),
-      max_len: Number(maxLen), city: city || null,
+      max_len: Number(maxLen), city: city || null, level, multi_item_only: multiOnly,
     }).then((result) => {
       setMessage({
         tone: result.rules ? "success" : "error",
@@ -303,14 +307,15 @@ export default function MarketBasket() {
             { label: "Baskets", value: int(run.metrics.baskets) },
             { label: "Frequent itemsets", value: int(run.metrics.frequent_itemsets) },
             { label: "Rules", value: int(run.metrics.rules) },
-            { label: "Scope", value: run.params.city ?? "All cities" },
+            { label: "Scope", value: `${run.params.city ?? "All cities"}${run.params.multi_item_only ? ", multi-item baskets" : ""}` },
+            { label: "Items", value: run.params.level === "category" ? "Categories" : "Products" },
             { label: "Last run", value: `${dateTime(run.ran_at)} · ${run.duration}s` },
           ]} />
         )}
       />
 
       <RevealSection aria-label="Apriori parameters" className="border-y border-ink py-3">
-        <div className="grid grid-cols-2 items-end gap-x-3 gap-y-3 md:grid-cols-6">
+        <div className="grid grid-cols-2 items-end gap-x-3 gap-y-3 md:grid-cols-4 xl:grid-cols-8">
           <Field label="Min support %"><input className="field" type="number" min="0.2" max="100" step="0.1" value={support} onChange={(e) => setSupport(e.target.value)} /></Field>
           <Field label="Min confidence %"><input className="field" type="number" min="1" max="100" step="5" value={confidence} onChange={(e) => setConfidence(e.target.value)} /></Field>
           <Field label="Min lift"><input className="field" type="number" min="0" step="0.5" value={lift} onChange={(e) => setLift(e.target.value)} /></Field>
@@ -323,11 +328,26 @@ export default function MarketBasket() {
               {members.data?.city.map((c) => <option key={c}>{c}</option>)}
             </Select>
           </Field>
+          <Field label="Items">
+            <Select value={level} onChange={(e) => setLevel(e.target.value)}>
+              <option value="product">Products</option>
+              <option value="category">Categories</option>
+            </Select>
+          </Field>
+          <label className="flex h-[34px] cursor-pointer items-center gap-2 border border-rule bg-card px-2.5 text-[12px]" title="Mine only baskets with two or more items. Support then means share of multi-item baskets.">
+            <input type="checkbox" checked={multiOnly} onChange={(e) => setMultiOnly(e.target.checked)} className="size-3.5 accent-accent" />
+            Multi-item baskets only
+          </label>
           <Button variant="primary" busy={running} onClick={execute}>{running ? "Mining" : "Run Apriori"}</Button>
         </div>
       </RevealSection>
       <LoadingBar active={running} />
       {message && <div className="mt-3"><Notice tone={message.tone} onDismiss={() => setMessage(null)}>{message.text}</Notice></div>}
+      {run?.params.multi_item_only && (
+        <p className="mt-3 max-w-3xl text-[12.5px] leading-snug text-muted">
+          These rules come from the {int(run.metrics.baskets)} baskets with two or more items, so support is a share of those baskets. Most orders in this dataset contain a single item, which on their own make every pair look rarer than chance.
+        </p>
+      )}
 
       {!rules.data ? <LoadingBlock height={480} /> : !hasRules ? (
         <div className="mt-8">

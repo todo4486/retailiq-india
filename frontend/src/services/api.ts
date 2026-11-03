@@ -127,7 +127,7 @@ export const api = {
   ruleProducts: () => request<RuleProduct[]>("/basket/products"),
   productAssociations: (id: number) => request<ProductAssociations>(`/basket/products/${id}`),
   network: (limit = 36) => request<BasketNetwork>(`/basket/network${qs({ limit })}`),
-  runApriori: (body: { min_support: number; min_confidence: number; min_lift: number; max_len: number; city: string | null }) =>
+  runApriori: (body: { min_support: number; min_confidence: number; min_lift: number; max_len: number; city: string | null; level: string; multi_item_only: boolean }) =>
     post<{ rules: number; baskets: number; frequent_itemsets: number }>("/basket/run", body),
 
   report: (type: string, from?: string, to?: string) => request<Report>(`/reports/${type}${qs({ from, to })}`),

@@ -63,11 +63,12 @@ DDL = [
     """
     CREATE TABLE IF NOT EXISTS DIM_GEOGRAPHY (
         Geography_ID INT          NOT NULL,
-        City         VARCHAR(100) NOT NULL,
-        State        VARCHAR(100) NOT NULL,
+        -- Accent- and case-sensitive, so MySQL and Pandas agree on what counts as the same place.
+        City         VARCHAR(100) COLLATE utf8mb4_0900_as_cs NOT NULL,
+        State        VARCHAR(100) COLLATE utf8mb4_0900_as_cs NOT NULL,
         Region       VARCHAR(100) NOT NULL,
         PRIMARY KEY (Geography_ID),
-        UNIQUE KEY idx_geo_city (City),
+        UNIQUE KEY idx_geo_city_state (City, State),
         KEY idx_geo_state (State),
         KEY idx_geo_region (Region)
     ) ENGINE=InnoDB
@@ -185,7 +186,12 @@ def migrate_if_needed():
         SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.TABLES
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DIM_GEOGRAPHY'
     """)
-    if existing["n"] and not current["n"]:
+    keyed = one("""
+        SELECT COUNT(*) AS n FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DIM_GEOGRAPHY' AND INDEX_NAME = 'idx_geo_city_state'
+    """)
+    # Earlier versions keyed geography by country, then by city alone.
+    if existing["n"] and (not current["n"] or not keyed["n"]):
         with engine().begin() as conn:
             for table in ["CUSTOMER_RFM", "ASSOCIATION_RULES", "MINING_RUNS", "ETL_RUNS", "FACT_SALES",
                           "DIM_CUSTOMER", "DIM_PRODUCT", "DIM_DATE", "DIM_GEOGRAPHY"]:

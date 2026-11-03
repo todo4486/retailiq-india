@@ -7,6 +7,7 @@ Those attributes are DERIVED here with explicit, inspectable rules. A CSV that d
 contain them (see the optional roles below) keeps its own values.
 """
 import re
+import unicodedata
 
 import pandas as pd
 
@@ -20,13 +21,18 @@ ROLE_ALIASES = {
     "unit_price": ["unitprice", "price", "priceeach", "unitcost", "price_per_unit", "priceperunit"],
     "customer_id": ["customerid", "customerno", "customernumber", "customer", "clientid", "customercode", "custid"],
     "customer_name": ["customername", "clientname", "fullname"],
-    "city": ["city", "cityname", "town", "storecity", "storelocation", "location"],
-    "state": ["state", "statename", "province", "stateut"],
+    "city": ["city", "cityname", "town", "storecity", "storelocation", "location", "shipcity", "deliverycity", "billingcity", "customercity"],
+    "state": ["state", "statename", "province", "stateut", "shipstate", "deliverystate", "billingstate", "customerstate"],
     "country": ["country", "countryname", "market", "nation"],
     "region": ["region", "territory", "salesregion"],
     "category": ["category", "productcategory", "productline", "department", "categoryname"],
+    # A line total (quantity x price) for sources with no unit price, such as marketplace reports.
+    "line_amount": ["amount", "lineamount", "linetotal", "totalamount", "salesamount", "grossamt", "grossamount",
+                    "netamount", "orderamount", "totalprice", "sales"],
+    # Order status: cancelled, returned and similar orders are not sales.
+    "status": ["status", "orderstatus", "transactionstatus", "deliverystatus"],
 }
-REQUIRED_ROLES = ["invoice", "quantity", "date", "unit_price"]
+REQUIRED_ROLES = ["invoice", "quantity", "date"]
 ROLE_LABELS = {
     "invoice": "Invoice / transaction ID",
     "stock_code": "Product code",
@@ -41,6 +47,8 @@ ROLE_LABELS = {
     "country": "Country (used if no city)",
     "region": "Region",
     "category": "Category",
+    "line_amount": "Line amount (if no unit price)",
+    "status": "Order status",
 }
 
 
@@ -62,6 +70,8 @@ def detect_roles(columns):
 
 def missing_roles(roles):
     missing = [r for r in REQUIRED_ROLES if not roles.get(r)]
+    if not roles.get("unit_price") and not roles.get("line_amount"):
+        missing.append("unit_price or line_amount")
     if not roles.get("stock_code") and not roles.get("description"):
         missing.append("stock_code or description")
     return missing
@@ -96,11 +106,21 @@ SHORT_CODE = re.compile(r"^(M|D|C2|S|B)$", re.I)
 NON_MERCHANDISE_TEXT = re.compile(r"MANUAL|DISCOUNT|SAMPLES?|ADJUST|CARRIAGE", re.I)
 
 
-def non_merchandise_mask(codes: pd.Series, descriptions: pd.Series) -> pd.Series:
+# Supermarket lines that are not merchandise: fuel (quantities in thousandths of a gallon),
+# coupons and gift-card activations. Matched on the whole product name or department.
+NON_MERCHANDISE_NAME = re.compile(r"^gasoline\b|^coupons?\b|gift cards? activ", re.I)
+NON_MERCHANDISE_DEPARTMENT = re.compile(r"^(fuel|kiosk-gas|coupon)$", re.I)
+
+
+def non_merchandise_mask(codes: pd.Series, descriptions: pd.Series, categories: pd.Series = None) -> pd.Series:
     certain = codes.str.fullmatch(NON_MERCHANDISE_CODE.pattern, case=False)
     short = codes.str.fullmatch(SHORT_CODE.pattern, case=False)
     confirmed = descriptions.str.contains(NON_MERCHANDISE_TEXT.pattern, case=False, regex=True)
-    return certain | (short & confirmed)
+    named = descriptions.str.contains(NON_MERCHANDISE_NAME.pattern, case=False, regex=True)
+    mask = certain | (short & confirmed) | named
+    if categories is not None:
+        mask |= categories.str.fullmatch(NON_MERCHANDISE_DEPARTMENT.pattern, case=False)
+    return mask.fillna(False)
 
 
 # First matching rule wins, so seasonal and specific families precede broad ones.
@@ -147,6 +167,64 @@ INDIAN_CITIES = {
     "Vadodara": ("Gujarat", "West"), "Indore": ("Madhya Pradesh", "Central"), "Bhopal": ("Madhya Pradesh", "Central"),
     "Raipur": ("Chhattisgarh", "Central"),
 }
+
+
+# Statuses meaning the goods were not sold: cancelled, returned, rejected, lost or damaged.
+NOT_SOLD_STATUS = re.compile(r"cancel|return|reject|refund|lost|damage", re.I)
+
+# Indian states and union territories, with RetailIQ's five regions plus North East.
+STATE_REGION = {
+    "Delhi": "North", "Haryana": "North", "Punjab": "North", "Himachal Pradesh": "North", "Jammu & Kashmir": "North",
+    "Ladakh": "North", "Uttar Pradesh": "North", "Uttarakhand": "North", "Rajasthan": "North", "Chandigarh": "North",
+    "Maharashtra": "West", "Gujarat": "West", "Goa": "West", "Dadra & Nagar Haveli and Daman & Diu": "West",
+    "Karnataka": "South", "Kerala": "South", "Tamil Nadu": "South", "Telangana": "South", "Andhra Pradesh": "South",
+    "Puducherry": "South", "Lakshadweep": "South", "Andaman & Nicobar Islands": "South",
+    "West Bengal": "East", "Odisha": "East", "Bihar": "East", "Jharkhand": "East",
+    "Assam": "North East", "Arunachal Pradesh": "North East", "Manipur": "North East", "Meghalaya": "North East",
+    "Mizoram": "North East", "Nagaland": "North East", "Sikkim": "North East", "Tripura": "North East",
+    "Madhya Pradesh": "Central", "Chhattisgarh": "Central",
+}
+# Spellings and abbreviations seen in real exports, compared on letters only.
+_STATE_ALIASES = {
+    "ORISSA": "Odisha", "RAJSTHAN": "Rajasthan", "RAJSHTHAN": "Rajasthan", "RJ": "Rajasthan", "PB": "Punjab",
+    "PUNJABMOHALIZIRAKPUR": "Punjab", "NL": "Nagaland", "AR": "Arunachal Pradesh", "NEWDELHI": "Delhi", "DL": "Delhi",
+    "NCTOFDELHI": "Delhi", "PONDICHERRY": "Puducherry", "DADRAANDNAGAR": "Dadra & Nagar Haveli and Daman & Diu",
+    "DADRAANDNAGARHAVELI": "Dadra & Nagar Haveli and Daman & Diu", "DAMANANDDIU": "Dadra & Nagar Haveli and Daman & Diu",
+    "ANDAMANNICOBAR": "Andaman & Nicobar Islands", "ANDAMANANDNICOBARISLANDS": "Andaman & Nicobar Islands",
+    "JAMMUANDKASHMIR": "Jammu & Kashmir", "JK": "Jammu & Kashmir", "UTTARANCHAL": "Uttarakhand", "UK": "Uttarakhand",
+    "MH": "Maharashtra", "KA": "Karnataka", "TN": "Tamil Nadu", "UP": "Uttar Pradesh", "GJ": "Gujarat", "WB": "West Bengal",
+    "TS": "Telangana", "AP": "Andhra Pradesh", "KL": "Kerala", "HR": "Haryana", "MP": "Madhya Pradesh", "OR": "Odisha",
+    "OD": "Odisha", "CG": "Chhattisgarh", "HP": "Himachal Pradesh", "BR": "Bihar", "JH": "Jharkhand", "GA": "Goa",
+    "APO": "Army Post Office",
+}
+_STATE_BY_LETTERS = {re.sub(r"[^A-Z]", "", s.upper()): s for s in STATE_REGION}
+_STATE_BY_LETTERS.update({k: v for k, v in _STATE_ALIASES.items()})
+_STATE_BY_LETTERS["ANDAMANNICOBARISLANDS"] = "Andaman & Nicobar Islands"
+_STATE_BY_LETTERS["DADRANAGARHAVELIANDDAMANDIU"] = "Dadra & Nagar Haveli and Daman & Diu"
+
+# Old and alternative city names, merged so one city is one member of the dimension.
+CITY_ALIASES = {"Bangalore": "Bengaluru", "Bangaluru": "Bengaluru", "Bengaluru Urban": "Bengaluru", "Gurgaon": "Gurugram",
+                "Bombay": "Mumbai", "Calcutta": "Kolkata", "Madras": "Chennai", "Poona": "Pune", "Mysore": "Mysuru",
+                "Trivandrum": "Thiruvananthapuram", "लखनऊ": "Lucknow", "Cochin": "Kochi", "Vizag": "Visakhapatnam", "Baroda": "Vadodara"}
+
+
+def clean_state(name):
+    """Canonical state name for Indian spellings; other values are tidied but kept."""
+    if not isinstance(name, str) or not name.strip():
+        return None
+    letters = re.sub(r"[^A-Z]", "", name.upper())
+    if letters in _STATE_BY_LETTERS:
+        return _STATE_BY_LETTERS[letters]
+    return re.sub(r"\s+", " ", name).strip(" .,").title()
+
+
+def clean_city(name):
+    if not isinstance(name, str) or not name.strip():
+        return None
+    # Accents are dropped (Talegàon and Talegaon are one town), then spacing and case are tidied.
+    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+    tidy = re.sub(r"\s+", " ", plain).strip(" .,;-").title()
+    return CITY_ALIASES.get(tidy, tidy) or None
 
 
 def geography_for(place):

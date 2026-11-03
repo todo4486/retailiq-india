@@ -172,11 +172,18 @@ export default function CustomerIntelligence() {
       {message && <div className="-mt-4 mb-8"><Notice tone={message.tone} onDismiss={() => setMessage(null)}>{message.text}</Notice></div>}
 
       {!segments.length ? (
-        <EmptyState
-          title="No clusters yet"
-          body="This warehouse has no customer segments, or it has no customer numbers to cluster. Run K-Means to compute them."
-          action={<Button variant="primary" busy={running} onClick={() => execute(k)}>Run K-Means</Button>}
-        />
+        overview.data.identified_customers === 0 ? (
+          <EmptyState
+            title="This dataset has no customer identifiers"
+            body="RFM needs to know which orders belong to the same customer. The loaded data has no customer IDs (marketplace reports such as the Amazon.in seller export omit them), so every sale belongs to the unknown member and K-Means cannot run. Load the synthetic dataset or the UCI dataset in Warehouse to explore customer segments."
+          />
+        ) : (
+          <EmptyState
+            title="No clusters yet"
+            body="This warehouse has no customer segments yet. Run K-Means to compute them."
+            action={<Button variant="primary" busy={running} onClick={() => execute(k)}>Run K-Means</Button>}
+          />
+        )
       ) : (
         <>
           <RevealSection className="grid grid-cols-12 md:gap-x-10 gap-y-10">

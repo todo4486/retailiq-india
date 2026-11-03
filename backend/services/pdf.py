@@ -97,6 +97,7 @@ def build_pdf(report):
         Paragraph("RETAILIQ INDIA / ANALYTICAL REPORT", label),
         Paragraph(report["title"], title),
         Paragraph(_escape(report["data_notice"]), label),
+        *([Paragraph(_escape("SOURCE " + report["data_source"]), label)] if report.get("data_source") else []),
         Paragraph(
             f"DATASET {_escape(report['dataset'].upper())} &nbsp;·&nbsp; RANGE {report['range']['from']} TO {report['range']['to']} "
             f"&nbsp;·&nbsp; GENERATED {generated.upper()}", label),
@@ -124,7 +125,9 @@ def build_pdf(report):
         story.append(Paragraph(report["chart"]["title"], heading))
         w, h = ImageReader(png).getSize()
         png.seek(0)
-        story.append(Image(png, width=width, height=width * h / w))
+        # The chart shares page 1 with the summary and findings, so its height is capped.
+        draw_width = min(width, 220 * w / h)
+        story.append(Image(png, width=draw_width, height=draw_width * h / w, hAlign="LEFT"))
     if report.get("note"):
         story += [Spacer(1, 4), Paragraph(_escape(report["note"]), label)]
 

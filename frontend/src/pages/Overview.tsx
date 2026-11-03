@@ -44,7 +44,12 @@ function RevenueChart({ data }: { data: OverviewData }) {
           { label: "Revenue", color: "#315C46" },
           ...(hasCompare ? [{ label: data.compare === "year" ? "A year earlier" : "Previous period", color: "#D58A52", dashed: true }] : []),
         ]} />
-        {data.partial_month && <span className="num text-[11px] text-muted">{monthLabel(data.partial_month.month)} has data to day {data.partial_month.through_day} only</span>}
+        <span className="num text-[11px] text-muted">
+          {[
+            data.partial_first_month && `${monthLabel(data.partial_first_month.month)} has data from day ${data.partial_first_month.from_day} only`,
+            data.partial_month && `${monthLabel(data.partial_month.month)} has data to day ${data.partial_month.through_day} only`,
+          ].filter(Boolean).join(". ")}
+        </span>
       </div>
       <div className="h-[320px] sm:h-[420px]">
         <InViewChart>
@@ -71,6 +76,7 @@ function RevenueChart({ data }: { data: OverviewData }) {
               }}
             />
             {data.partial_month && <ReferenceLine x={data.partial_month.month} stroke="#85847F" strokeDasharray="2 3" />}
+            {data.partial_first_month && <ReferenceLine x={data.partial_first_month.month} stroke="#85847F" strokeDasharray="2 3" />}
             {hasCompare && <Line type="monotone" dataKey="compare" stroke="#D58A52" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls={false} animationDuration={1100} activeDot={{ r: 4, stroke: "#FFF", strokeWidth: 2 }} />}
             <Line type="monotone" dataKey="revenue" stroke="#315C46" strokeWidth={2} dot={{ r: 2.5, fill: "#315C46", strokeWidth: 0 }} activeDot={{ r: 5, stroke: "#FFF", strokeWidth: 2 }} animationDuration={1300} />
           </LineChart>
@@ -175,10 +181,17 @@ export default function Overview() {
         </motion.div>
       </header>
 
-      {data?.data_kind === "synthetic" && (
+      {data && status?.data_notice && (
         <Reveal y={8}>
-          <p className="mb-10 border-l-2 border-accent2 bg-card px-3 py-2 text-[13px] leading-snug">
-            <strong className="font-semibold">Synthetic demonstration data.</strong> These figures are simulated and do not represent the sales of any real company, or actual market data.
+          <p className={`mb-10 border-l-2 bg-card px-3 py-2 text-[13px] leading-snug ${data.data_kind === "real" ? "border-accent" : "border-accent2"}`}>
+            {data.data_kind === "synthetic" ? (
+              <><strong className="font-semibold">Synthetic demonstration data.</strong> These figures are simulated and do not represent the sales of any real company, or actual market data.</>
+            ) : (
+              <>
+                <strong className="font-semibold">{data.data_kind === "real" ? "Real data." : "Imported data."}</strong> {status.data_notice.notice.replace(/^Real data: /, "")}
+                {status.data_notice.source && <> <a href={status.data_notice.source} target="_blank" rel="noreferrer" className="text-accent underline underline-offset-2">Source</a></>}
+              </>
+            )}
           </p>
         </Reveal>
       )}
@@ -248,7 +261,12 @@ export default function Overview() {
           <section className="mt-20 grid grid-cols-12 gap-y-16 md:gap-x-12">
             <RevealSection className="col-span-12 lg:col-span-5">
               <SectionHead index="02 / Cities" title="City-wise revenue" aside={<Link to="/reports?type=cities" className="text-[13px] font-semibold text-accent hover:underline">Report →</Link>} />
-              <RankedBars rows={data.cities.map((c) => ({ key: c.city, label: c.city, value: c.revenue, note: `${c.state}, ${c.region} · ${pct(c.revenue / total)}` }))} />
+              <RankedBars rows={data.cities.slice(0, 12).map((c) => ({ key: `${c.city}|${c.state}`, label: c.city, value: c.revenue, note: `${c.state}, ${c.region} · ${pct(c.revenue / total)}` }))} />
+              {data.cities.length > 12 && (
+                <p className="num mt-2 text-[11.5px] text-muted">
+                  Top 12 of {int(data.cities.length)} cities. The other {int(data.cities.length - 12)} contribute {pct(data.cities.slice(12).reduce((sum, c) => sum + c.revenue, 0) / total)}. <Link to="/reports?type=cities" className="text-accent hover:underline">All cities →</Link>
+                </p>
+              )}
             </RevealSection>
             <RevealSection className="col-span-12 lg:col-span-7" transition={{ duration: 0.8, ease: EASE, delay: 0.1 }}>
               <SectionHead index="03 / Categories" title="Category performance" aside={<Link to="/olap" className="text-[13px] font-semibold text-accent hover:underline">Analyse →</Link>} />

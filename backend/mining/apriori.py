@@ -35,18 +35,40 @@ from db.connection import engine, one, rows
 from errors import ApiError, WarehouseEmpty
 from mining.rfm import run_info
 
-DEFAULTS = {"min_support": 0.01, "min_confidence": 0.3, "min_lift": 1.0, "max_len": 3, "city": None}
-MIN_SUPPORT_FLOOR = 0.002  # lower values make the number of itemsets explode
+DEFAULTS = {"min_support": 0.01, "min_confidence": 0.3, "min_lift": 1.0, "max_len": 3, "city": None, "level": "product",
+            "multi_item_only": False}
+MIN_SUPPORT_FLOOR = 0.0005  # lower values make the number of itemsets explode
 
 
-def _baskets(city):
-    """Read (basket, product) pairs from the warehouse, optionally for one city."""
-    sql = "SELECT DISTINCT f.Transaction_ID, f.Product_ID FROM FACT_SALES f"
+def _baskets(city, level, multi_item_only=False):
+    """
+    Read (basket, item) pairs from the warehouse, optionally for one city.
+    level="category" mines one level up the product hierarchy (multi-level association rules):
+    useful when most baskets hold a single product, as in marketplace order reports.
+    multi_item_only keeps baskets of two or more items. Marketplace orders are mostly single items,
+    which makes every pair look rarer than chance; restricting the population fixes that, and then
+    support means "share of multi-item baskets".
+    Returns the pairs and a dictionary of item id -> display name.
+    """
+    item = "p.Category" if level == "category" else "f.Product_ID"
+    sql = f"SELECT DISTINCT f.Transaction_ID, {item} AS item FROM FACT_SALES f JOIN DIM_PRODUCT p ON f.Product_ID = p.Product_ID"
     params = {}
     if city:
         sql += " JOIN DIM_GEOGRAPHY g ON f.Geography_ID = g.Geography_ID WHERE g.City = :city"
         params["city"] = city
-    return pd.read_sql_query(text(sql), engine(), params=params)
+    pairs = pd.read_sql_query(text(sql), engine(), params=params)
+    if multi_item_only:
+        sizes = pairs.groupby("Transaction_ID")["item"].transform("size")
+        pairs = pairs[sizes > 1]
+    if level == "category":
+        categories = sorted(pairs["item"].unique())
+        ids = {name: index + 1 for index, name in enumerate(categories)}
+        pairs["Product_ID"] = pairs["item"].map(ids)
+        names = {index: name for name, index in ids.items()}
+    else:
+        pairs["Product_ID"] = pairs["item"].astype(int)
+        names = {r["Product_ID"]: r["Product_Name"] for r in rows("SELECT Product_ID, Product_Name FROM DIM_PRODUCT")}
+    return pairs[["Transaction_ID", "Product_ID"]], names
 
 
 def _one_hot(pairs):
@@ -67,13 +89,15 @@ def _one_hot(pairs):
         return pd.DataFrame.sparse.from_spmatrix(matrix, columns=columns)
 
 
-def run_apriori(min_support=None, min_confidence=None, min_lift=None, max_len=None, city=None):
+def run_apriori(min_support=None, min_confidence=None, min_lift=None, max_len=None, city=None, level=None, multi_item_only=None):
     params = {
         "min_support": float(DEFAULTS["min_support"] if min_support is None else min_support),
         "min_confidence": float(DEFAULTS["min_confidence"] if min_confidence is None else min_confidence),
         "min_lift": float(DEFAULTS["min_lift"] if min_lift is None else min_lift),
         "max_len": int(DEFAULTS["max_len"] if max_len is None else max_len),
         "city": city or None,
+        "level": level if level in ("product", "category") else DEFAULTS["level"],
+        "multi_item_only": bool(multi_item_only),
     }
     if not MIN_SUPPORT_FLOOR <= params["min_support"] <= 1:
         raise ApiError(f"Minimum support must be between {MIN_SUPPORT_FLOOR} and 1.")
@@ -83,7 +107,7 @@ def run_apriori(min_support=None, min_confidence=None, min_lift=None, max_len=No
         raise ApiError("Maximum itemset size must be between 2 and 4.")
 
     started = time.time()
-    pairs = _baskets(params["city"])
+    pairs, names = _baskets(params["city"], params["level"], params["multi_item_only"])
     if pairs.empty:
         raise ApiError("No baskets match this selection.", status=409, code="no_baskets")
     one_hot = _one_hot(pairs)
@@ -98,7 +122,6 @@ def run_apriori(min_support=None, min_confidence=None, min_lift=None, max_len=No
         found = association_rules(frequent, num_itemsets=len(one_hot), metric="confidence",
                                   min_threshold=params["min_confidence"])
         found = found[found["lift"] >= params["min_lift"]].sort_values("lift", ascending=False)
-        names = {r["Product_ID"]: r["Product_Name"] for r in rows("SELECT Product_ID, Product_Name FROM DIM_PRODUCT")}
         for rule_id, rule in enumerate(found.itertuples(index=False), start=1):
             ante = sorted(int(i) for i in rule.antecedents)
             cons = sorted(int(i) for i in rule.consequents)
@@ -108,7 +131,8 @@ def run_apriori(min_support=None, min_confidence=None, min_lift=None, max_len=No
                 float(rule.lift), float(rule.leverage),
             ))
 
-    metrics = {"baskets": int(len(one_hot)), "products": int(one_hot.shape[1]),
+    multi = int((pairs.groupby("Transaction_ID").size() > 1).sum())
+    metrics = {"baskets": int(len(one_hot)), "products": int(one_hot.shape[1]), "multi_item_baskets": multi,
                "frequent_itemsets": int(len(frequent)), "rules": len(rule_rows)}
     with engine().begin() as conn:
         conn.execute(text("DELETE FROM ASSOCIATION_RULES"))
@@ -182,9 +206,10 @@ def associations_for(product_id):
     Both directions are returned because confidence is asymmetric while lift is not.
     """
     pid = int(product_id)
-    name = one("SELECT Product_Name AS n FROM DIM_PRODUCT WHERE Product_ID=:p", {"p": pid})
-    if not name:
-        raise ApiError("Product not found.", status=404, code="not_found")
+    # Items are products or, after category-level mining, categories, so the name comes from the rules.
+    item = next((p for p in rule_products() if p["id"] == pid), None)
+    if not item:
+        raise ApiError("This item is not in any association rule.", status=404, code="not_found")
     params = {"pid": str(pid)}
     pair_rules = rows("""
         SELECT * FROM ASSOCIATION_RULES
@@ -203,7 +228,7 @@ def associations_for(product_id):
             "confidence_to": None, "confidence_from": None,
         })
         partner["confidence_to" if outgoing else "confidence_from"] = rule["confidence"]
-    return {"id": pid, "name": name["n"], "associations": sorted(partners.values(), key=lambda p: -p["lift"])}
+    return {"id": pid, "name": item["name"], "associations": sorted(partners.values(), key=lambda p: -p["lift"])}
 
 
 def network(limit=40):

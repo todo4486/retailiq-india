@@ -9,6 +9,7 @@ from errors import ApiError, WarehouseEmpty
 from etl.pipeline import latest_success
 from mining.apriori import get_rules
 from mining.rfm import run_info, segment_summary
+from services.datasets import notice_for
 from services.inr import format_inr, format_number
 from services.overview import _date_bounds, _month_index, data_span
 
@@ -66,7 +67,10 @@ def _sales(start, end):
         partial_month = None
         if last.day < calendar.monthrange(last.year, last.month)[1] - 2:
             partial_month = last_date[:7]
-        complete = [r for r in monthly if r["month"] != partial_month] or monthly
+        first_date, _ = data_span()
+        starts_late = dt.date.fromisoformat(first_date[:10]).day > 3
+        partial_first = first_date[:7] if starts_late else None
+        complete = [r for r in monthly if r["month"] not in (partial_month, partial_first)] or monthly
         peak = max(complete, key=lambda r: r["revenue"])
         low = min(complete, key=lambda r: r["revenue"])
         findings = [
@@ -74,6 +78,8 @@ def _sales(start, end):
             f"The strongest complete month was {peak['month']} at {_money(peak['revenue'])}.",
             f"The weakest complete month was {low['month']} at {_money(low['revenue'])}.",
         ]
+        if partial_first and any(r["month"] == partial_first for r in monthly):
+            findings.append(f"{partial_first} is incomplete: the data starts on day {dt.date.fromisoformat(first_date[:10]).day}.")
         if partial_month and any(r["month"] == partial_month for r in monthly):
             findings.append(f"{partial_month} is incomplete: the data ends on day {last.day}.")
     return {
@@ -229,8 +235,10 @@ def _basket(_start, _end):
         findings = [
             f"Strongest rule: {data[0]['antecedent']} → {data[0]['consequent']}, lift {data[0]['lift']:.1f}.",
             f"Customers buying the first also buy the second {data[0]['confidence']:.0%} of the time.",
-            f"Apriori produced {format_number(found['total'])} rules from {format_number(run['metrics']['baskets'])} baskets "
-            f"at {run['params']['min_support']:.1%} minimum support.",
+            f"Apriori produced {format_number(found['total'])} rules from {format_number(run['metrics']['baskets'])} "
+            f"{'multi-item ' if run['params'].get('multi_item_only') else ''}baskets "
+            f"at {run['params']['min_support']:.1%} minimum support"
+            f"{', mining product categories' if run['params'].get('level') == 'category' else ''}.",
         ]
     return {
         "summary": [
@@ -264,7 +272,9 @@ def build_report(report_type, from_month=None, to_month=None):
     report = _BUILDERS[report_type](start, end)
     report.update(
         type=report_type, title=REPORT_TYPES[report_type], currency="₹",
-        dataset=run["dataset_name"], data_kind=run["kind"], data_notice=NOTICES.get(run["kind"], ""),
+        dataset=run["dataset_name"], data_kind=run["kind"],
+        data_notice=notice_for(run["dataset_id"], run["kind"])["notice"].upper(),
+        data_source=notice_for(run["dataset_id"], run["kind"])["source"],
         generated_at=dt.datetime.now().isoformat(timespec="seconds"),
         range={"from": start_month, "to": end_month},
     )

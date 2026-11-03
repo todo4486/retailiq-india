@@ -7,7 +7,8 @@ from the data and are what the ETL page displays. Nothing here is simulated.
 import numpy as np
 import pandas as pd
 
-from etl.mappings import categorize_series, geography_for, non_merchandise_mask
+from etl.mappings import (NOT_SOLD_STATUS, STATE_REGION, categorize_series, clean_city, clean_state, geography_for,
+                          non_merchandise_mask)
 from services.inr import format_inr
 
 UNKNOWN_CUSTOMER_ID = 0
@@ -18,20 +19,34 @@ def _mode(values: pd.Series):
     return counts.index[0] if len(counts) else None
 
 
+def detect_day_first(values: pd.Series) -> bool:
+    """
+    Decide whether numeric dates such as 04-05-22 are day-first or month-first.
+    If any value has a first number above 12, it must be a day: 30-04-22 is day-first.
+    If any has a second number above 12, the first must be a month: 04-30-22 is month-first.
+    With no evidence either way, day-first is assumed, the Indian convention.
+    """
+    parts = values.dropna().astype(str).str.extract(r"^(\d{1,2})[-/.](\d{1,2})[-/.]\d{2,4}")
+    parts = parts.dropna().astype(int)
+    if parts.empty or (parts[0] > 12).any():
+        return True
+    return not (parts[1] > 12).any()
+
+
 def parse_dates(values: pd.Series) -> pd.Series:
     """
     Parse mixed date formats. "mixed" format examines every value separately, which is slow,
     but sales data repeats timestamps heavily, so each distinct value is parsed only once.
     """
     distinct = pd.Series(values.dropna().unique(), dtype=object).astype(str)
-    # ISO dates are unambiguous. Anything else is read day-first, the Indian convention,
-    # so 03/04/2025 means 3 April rather than March 4.
+    # ISO dates are unambiguous. Other numeric dates follow the order detected in this column.
+    day_first = detect_day_first(distinct)
     is_iso = distinct.str.match(r"^\d{4}-\d{2}-\d{2}")
     parsed = pd.Series(pd.NaT, index=distinct.index, dtype="datetime64[ns]")
     if is_iso.any():
         parsed[is_iso] = pd.to_datetime(distinct[is_iso], errors="coerce", format="ISO8601")
     if (~is_iso).any():
-        parsed[~is_iso] = pd.to_datetime(distinct[~is_iso], errors="coerce", format="mixed", dayfirst=True)
+        parsed[~is_iso] = pd.to_datetime(distinct[~is_iso], errors="coerce", format="mixed", dayfirst=day_first)
     return values.map(dict(zip(distinct, parsed))).astype("datetime64[ns]")
 
 
@@ -45,11 +60,17 @@ def parse_price(values: pd.Series) -> pd.Series:
     return pd.to_numeric(stripped.str.replace(r"[^0-9.\-]", "", regex=True), errors="coerce")
 
 
+def _map_distinct(values: pd.Series, function):
+    """Apply a cleaning function once per distinct value: far faster on repetitive columns."""
+    distinct = values.dropna().unique()
+    return values.map({value: function(value) for value in distinct})
+
+
 def _standardize_columns(raw, roles):
     """Rename source columns to internal role names; absent optional roles become NaN."""
     df = pd.DataFrame(index=raw.index)
     for role in ["invoice", "stock_code", "description", "quantity", "date", "unit_price",
-                 "customer_id", "customer_name", "city", "state", "country", "region", "category"]:
+                 "customer_id", "customer_name", "city", "state", "country", "region", "category", "line_amount", "status"]:
         source = roles.get(role)
         if source:
             values = raw[source].astype("string").str.strip()
@@ -111,19 +132,30 @@ def transform(raw, roles, on_step=None, inr_rate=1.0):
 
     # 3. Standardise dates to a single datetime type.
     before = len(df)
+    order = "day-first" if detect_day_first(df["date"]) else "month-first"
     df["date"] = parse_dates(df["date"])
     df = df[df["date"].notna()].reset_index(drop=True)
-    record("Standardise date formats", "Parsed dates into ISO datetimes and dropped unparseable values.", before, len(df))
+    record("Standardise date formats", f"Parsed dates into ISO datetimes (numeric dates read {order}, detected from the data) "
+           "and dropped unparseable values.", before, len(df))
 
     # 4. Convert numeric columns.
     before = len(df)
     df["quantity"] = parse_quantity(df["quantity"])
-    df["unit_price"] = parse_price(df["unit_price"])
-    df = df[df["quantity"].notna() & df["unit_price"].notna()].reset_index(drop=True)
+    priced_from_total = df["unit_price"].isna().all() and df["line_amount"].notna().any()
+    if priced_from_total:
+        # A marketplace report gives the line total. The unit price is total / quantity.
+        total = parse_price(df["line_amount"])
+        df["unit_price"] = (total / df["quantity"]).where(df["quantity"] > 0)
+    else:
+        df["unit_price"] = parse_price(df["unit_price"])
+    # Zero-quantity lines (cancelled orders) have no price; the invalid-transaction step removes them.
+    df = df[df["quantity"].notna() & (df["unit_price"].notna() | (df["quantity"] <= 0))].reset_index(drop=True)
     df["quantity"] = df["quantity"].astype("int64")
     # Monetary values are always held in rupees. Imported data in another currency is converted.
     df["unit_price"] = (df["unit_price"].astype("float64") * float(inr_rate)).round(2)
-    detail = "Cast quantity to integer and price to decimal; dropped non-numeric values."
+    detail = "Cast quantity to integer and price to decimal; dropped values that could not be converted."
+    if priced_from_total:
+        detail += " Unit price derived as line amount ÷ quantity."
     if float(inr_rate) != 1:
         detail += f" Converted prices to INR at {float(inr_rate):g} per source unit."
     record("Convert numerical columns", detail, before, len(df))
@@ -136,13 +168,19 @@ def transform(raw, roles, on_step=None, inr_rate=1.0):
     df = df[df["product_code"].notna()]
     # A blank description is filled from another line with the same product code.
     names = df.dropna(subset=["description"]).groupby("product_code")["description"].agg(_mode)
-    df["description"] = df["description"].fillna(df["product_code"].map(names)).fillna(df["product_code"])
+    df["description"] = df["description"].fillna(df["product_code"].map(names).astype("string")).fillna(df["product_code"])
     df["description"] = df["description"].str.replace(r"\s+", " ", regex=True)
     df["customer_id"] = df["customer_id"].str.replace(r"\.0$", "", regex=True)
     missing_customers = int(df["customer_id"].isna().sum())
-    df["city"] = df["city"].fillna(df["country"]).fillna("Unspecified").str.strip().str.title().where(
-        df["city"].notna(), df["country"].fillna("Unspecified")
-    )
+    # Geography: tidy city and state spellings, then derive what the source does not give.
+    df["city"] = _map_distinct(df["city"], clean_city).fillna(df["country"]).fillna("Unspecified")
+    df["state"] = _map_distinct(df["state"], clean_state)
+    lookup = _map_distinct(df["city"], geography_for)
+    df["state"] = df["state"].fillna(lookup.str[0])
+    df["region"] = df["region"].fillna(df["state"].map(STATE_REGION)).fillna(lookup.str[1]).fillna("Other")
+    # Lower-case category labels from some exports ("kurta") are put in title case.
+    lower = df["category"].str.islower().fillna(False)
+    df.loc[lower, "category"] = df.loc[lower, "category"].str.title()
     df = df.reset_index(drop=True)
     record(
         "Handle missing values",
@@ -158,16 +196,21 @@ def transform(raw, roles, on_step=None, inr_rate=1.0):
     is_cancel = is_cancel[~is_reversed]
     record("Reverse cancelled purchases", "Removed purchases later cancelled in full (same customer, product and quantity).", before, len(df))
 
-    # 7. Remove invalid transactions.
+    # 7. Remove invalid transactions, including orders whose status says they were not sold.
     before = len(df)
-    df = df[~is_cancel]
+    not_sold = df["status"].str.contains(NOT_SOLD_STATUS.pattern, case=False, regex=True, na=False).to_numpy()
+    df = df[~(is_cancel | not_sold)]
     df = df[(df["quantity"] > 0) & (df["unit_price"] > 0)].reset_index(drop=True)
-    record("Remove invalid transactions", "Removed cancellation lines and lines with quantity or unit price of zero or below.", before, len(df))
+    detail = "Removed cancellation lines and lines with quantity or unit price of zero or below."
+    if not_sold.any():
+        detail += f" {int(not_sold.sum()):,} lines had a cancelled, returned, rejected or lost status."
+    record("Remove invalid transactions", detail, before, len(df))
 
     # 8. Remove non-product lines (postage, bank charges, manual adjustments).
     before = len(df)
-    df = df[~non_merchandise_mask(df["product_code"], df["description"])].reset_index(drop=True)
-    record("Remove non-merchandise lines", "Removed postage, fees, manual adjustments and gift vouchers.", before, len(df))
+    df = df[~non_merchandise_mask(df["product_code"], df["description"], df["category"])].reset_index(drop=True)
+    record("Remove non-merchandise lines", "Removed postage, fees, manual adjustments, vouchers, fuel, coupons and "
+           "gift-card activations.", before, len(df))
 
     if df.empty:
         raise ValueError("No valid transactions remain after cleaning. Check the column mapping.")
@@ -194,6 +237,13 @@ def _build_star(df):
     Surrogate keys are small integers owned by the warehouse. They isolate it from
     changes in source codes and make the fact table's joins fast.
     """
+    # Products with only a code (common in marketplace reports) are named "Category Code".
+    # The name keeps the source's own spelling of the code (Accessories, not ACCESSORIES).
+    named_by_code = (df["description"] == df["product_code"]) & df["stock_code"].notna()
+    has_category = named_by_code & df["category"].notna()
+    df.loc[has_category, "description"] = df["category"] + " " + df["stock_code"]
+    df.loc[named_by_code & ~has_category, "description"] = df["stock_code"]
+
     # DIM_PRODUCT: one row per stock code; the most frequent spelling names the product.
     product = df.groupby("product_code", sort=True).agg(
         Product_Name=("description", _mode), Source_Category=("category", _mode)
@@ -234,13 +284,12 @@ def _build_star(df):
         "Day": days.dt.day, "Month": days.dt.month, "Quarter": days.dt.quarter, "Year": days.dt.year,
     }).reset_index(drop=True)
 
-    # DIM_GEOGRAPHY: one row per city. Source state and region win; otherwise the lookup in mappings.py.
-    geo = df.groupby("city", sort=True).agg(Source_State=("state", _mode), Source_Region=("region", _mode)).reset_index()
+    # DIM_GEOGRAPHY: one row per city within a state, because names repeat (Aurangabad is in two states).
+    df["state"] = df["state"].fillna("Unspecified")
+    geo = df.groupby(["city", "state"], sort=True).agg(Region=("region", _mode)).reset_index()
     geo["Geography_ID"] = np.arange(1, len(geo) + 1)
-    lookup = geo["city"].map(geography_for)
-    geo["State"] = geo["Source_State"].astype(object).where(geo["Source_State"].notna(), lookup.str[0])
-    geo["Region"] = geo["Source_Region"].astype(object).where(geo["Source_Region"].notna(), lookup.str[1])
-    dim_geography = geo.rename(columns={"city": "City"})[["Geography_ID", "City", "State", "Region"]]
+    dim_geography = geo.rename(columns={"city": "City", "state": "State"})[["Geography_ID", "City", "State", "Region"]]
+    geo_key = dict(zip(zip(geo["city"], geo["state"]), geo["Geography_ID"]))
 
     # FACT_SALES: swap natural keys for surrogate keys.
     fact = pd.DataFrame({
@@ -250,7 +299,7 @@ def _build_star(df):
         .fillna(UNKNOWN_CUSTOMER_ID).astype(int),
         "Product_ID": df["product_code"].map(dict(zip(product["product_code"], product["Product_ID"]))).astype(int),
         "Date_ID": df["date"].dt.strftime("%Y%m%d").astype(int),
-        "Geography_ID": df["city"].map(dict(zip(geo["city"], geo["Geography_ID"]))).astype(int),
+        "Geography_ID": pd.Series(list(zip(df["city"], df["state"])), index=df.index).map(geo_key).astype(int),
         "Quantity": df["quantity"],
         "Unit_Price": df["unit_price"],
         "Revenue": df["revenue"],

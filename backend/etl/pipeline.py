@@ -118,11 +118,26 @@ def _run(run_id, path, roles, inr_rate):
             cluster = run_clustering(min(5, customers - 1))
             cluster_text = f"K-Means segmented {cluster['customers']:,} customers into {cluster['k']} clusters."
         else:
-            cluster_text = f"K-Means skipped: only {customers} identified customers."
+            cluster_text = ("K-Means skipped: this dataset has no customer identifiers." if not customers
+                            else f"K-Means skipped: only {customers} identified customers.")
         basket = run_apriori()
+        basket_text = f"Apriori produced {basket['rules']:,} association rules."
+        has_multi = bool(basket.get("multi_item_baskets"))
+        if not basket["rules"] and not has_multi:
+            basket_text = "Apriori found no rules: every order contains a single product, so there are no co-purchases to mine."
+        if not basket["rules"] and has_multi:
+            # Marketplace orders are mostly single items. Mine only the multi-item baskets instead,
+            # where support means "share of baskets with two or more items".
+            basket = run_apriori(min_support=0.005, min_confidence=0.2, multi_item_only=True)
+            basket_text = (f"Apriori found no rules across all baskets, so it mined the {basket['baskets']:,} "
+                           f"multi-item baskets: {basket['rules']:,} rules.")
+        if not basket["rules"] and has_multi:
+            # Still nothing: climb the product hierarchy and mine categories.
+            basket = run_apriori(min_support=0.02, min_confidence=0.2, level="category", multi_item_only=True)
+            basket_text = f"Apriori mined product categories in multi-item baskets: {basket['rules']:,} rules."
         stages["marts"].update(
             status="done", seconds=round(time.time() - started, 2),
-            detail=f"{cluster_text} Apriori produced {basket['rules']:,} association rules.",
+            detail=f"{cluster_text} {basket_text}",
         )
         _save(run_id, stages, status="success", finished=True)
     except Exception as exc:  # the run is recorded as failed instead of disappearing
